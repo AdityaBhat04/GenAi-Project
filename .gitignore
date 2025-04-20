@@ -1,0 +1,40 @@
+# Folders to exclude
+venv/
+data/
+notebooks/
+out/
+backgrounds/
+__pycache__/
+
+# Python cache files
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# IDE files
+.idea/
+.vscode/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Local development settings
+.env
+
+# Model files
+*.pt
+*.pth
+*.bin
+
+# Logs
+*.log
+
+# OS specific files
+.DS_Store
+Thumbs.db 
