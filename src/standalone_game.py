@@ -199,7 +199,8 @@ class StoryAdventure:
             "location": "forest",
             "inventory": [],
             "characters_met": [],
-            "current_quest": None
+            "current_quest": None,
+            "quest_progress": 0
         }
         
         # System prompts for different story stages
@@ -216,7 +217,11 @@ class StoryAdventure:
             "You are a creative story generator for an adventure game. Continue the story based on the "
             "player's actions with vivid, creative descriptions. Keep responses concise (2-3 sentences) "
             "and focused on advancing the narrative in a coherent way that builds upon previous events. "
-            "IMPORTANT: Use simple, everyday language that most people can understand. Avoid complex or "
+            "IMPORTANT: Regularly introduce objects that the player can add to their inventory. "
+            "Occasionally give the player clear tasks or quests to accomplish. "
+            "For example: 'You notice a rusty key that might unlock the mysterious door' or "
+            "'The village elder asks you to retrieve a special herb from the mountain'. "
+            "Use simple, everyday language that most people can understand. Avoid complex or "
             "uncommon words when possible. If you must use a complex word, provide a brief explanation in [brackets] "
             "immediately after the word."
         )
@@ -455,8 +460,19 @@ class StoryAdventure:
         # Compile the story context from memory
         story_so_far = "\n\n".join([item["text"] for item in self.story_memory])
         
+        # Include inventory and quest information
+        inventory_str = ", ".join(self.game_state["inventory"]) if self.game_state["inventory"] else "empty"
+        quest_str = self.game_state["current_quest"] if self.game_state["current_quest"] else "none"
+        
         # Create a context-aware prompt
-        context_prompt = f"Location: {self.game_state['location']} - {scene_desc}\n\nStory so far:\n{story_so_far}\n\nPlayer action: {action}\n\nWhat happens next?"
+        context_prompt = (
+            f"Location: {self.game_state['location']} - {scene_desc}\n\n"
+            f"Player inventory: {inventory_str}\n"
+            f"Current quest: {quest_str}\n\n"
+            f"Story so far:\n{story_so_far}\n\n"
+            f"Player action: {action}\n\n"
+            f"What happens next? (Include potential items for inventory or tasks for the player)"
+        )
         
         if self.use_api:
             # Use the OpenRouter API
@@ -534,6 +550,8 @@ class StoryAdventure:
     
     def update_game_state(self, action: str, continuation: str):
         """Update game state based on action and continuation."""
+        combined_text = (action + " " + continuation).lower()
+        
         # Check for location changes
         location_keywords = {
             'forest': ['forest', 'woods', 'trees'],
@@ -545,14 +563,54 @@ class StoryAdventure:
             'magical': ['realm', 'dimension', 'magical world']
         }
         
-        text = (action + " " + continuation).lower()
         for location, keywords in location_keywords.items():
-            if any(keyword in text for keyword in keywords):
+            if any(keyword in combined_text for keyword in keywords):
                 self.game_state['location'] = location
                 self.display.update_background(location)
                 break
-                
-        # Could add more state updates here (inventory, characters, etc.)
+        
+        # Check for inventory items
+        inventory_action_words = ['pick up', 'take', 'grab', 'collect', 'acquire', 'obtain', 'pocket', 'get']
+        potential_items = [
+            'key', 'sword', 'map', 'potion', 'book', 'scroll', 'gem', 'amulet', 'torch', 'compass', 
+            'dagger', 'shield', 'staff', 'wand', 'ring', 'coin', 'artifact', 'food', 'water', 'medicine',
+            'rope', 'flint', 'lantern', 'cloak', 'boots', 'crystal', 'flower', 'herb', 'stone', 'feather'
+        ]
+        
+        # Check for taking items
+        for action_word in inventory_action_words:
+            if action_word in combined_text:
+                for item in potential_items:
+                    # Check if the item is mentioned and not already in inventory
+                    if item in combined_text and item not in self.game_state['inventory']:
+                        self.game_state['inventory'].append(item)
+                        print(f"Added {item} to inventory")
+                        break
+        
+        # Check for quest-related content
+        quest_keywords = ['quest', 'mission', 'task', 'objective', 'assignment', 'challenge', 'retrieve', 'find', 'rescue']
+        if any(keyword in combined_text for keyword in quest_keywords) and not self.game_state['current_quest']:
+            # Try to extract a quest from the text
+            quest_phrases = [
+                "find the", "retrieve the", "rescue the", "locate the", "bring back the", 
+                "deliver the", "investigate the", "explore the", "defeat the", "solve the"
+            ]
+            
+            for phrase in quest_phrases:
+                if phrase in combined_text:
+                    start_idx = combined_text.find(phrase)
+                    # Get a reasonable chunk of text after the phrase
+                    quest_snippet = combined_text[start_idx:start_idx + 50]
+                    # Cut at the first period or comma
+                    for char in ['.', ',']:
+                        if char in quest_snippet:
+                            quest_snippet = quest_snippet.split(char)[0]
+                    
+                    if len(quest_snippet) > 5:  # Ensure it's not just the phrase
+                        self.game_state['current_quest'] = quest_snippet.strip()
+                        self.game_state['quest_progress'] = 0
+                        print(f"New quest: {self.game_state['current_quest']}")
+                        break
     
     def get_formatted_story(self):
         """Get the formatted story from memory for display."""
@@ -642,6 +700,68 @@ class StoryAdventure:
         
         return text
     
+    def handle_inventory_commands(self, action: str) -> bool:
+        """Handle inventory-specific commands and return True if processed."""
+        action = action.lower().strip()
+        
+        # Check for inventory commands
+        if action == 'inventory' or action == 'check inventory' or action == 'i':
+            inventory_text = "Your inventory contains: "
+            
+            if not self.game_state['inventory']:
+                inventory_text += "nothing."
+            else:
+                inventory_text += ", ".join(self.game_state['inventory']) + "."
+            
+            # Add this to the story memory without generating new content
+            self.story_memory.append({"segment": "action", "text": "You check your inventory."})
+            self.story_memory.append({"segment": "continuation", "text": inventory_text})
+            
+            # Update display
+            self.story_context = self.get_formatted_story()
+            self.display.render_text(self.story_context)
+            return True
+            
+        # Check for using items from inventory
+        use_patterns = ['use ', 'activate ', 'read ', 'open ', 'wear ', 'equip ', 'drink ', 'eat ']
+        for pattern in use_patterns:
+            if action.startswith(pattern):
+                item_name = action[len(pattern):].strip()
+                
+                if item_name in self.game_state['inventory']:
+                    # We'll let the normal story generation handle what happens when using an item
+                    return False
+                else:
+                    # Item not in inventory
+                    response = f"You don't have a {item_name} in your inventory."
+                    self.story_memory.append({"segment": "action", "text": f"You try to {pattern}{item_name}."})
+                    self.story_memory.append({"segment": "continuation", "text": response})
+                    
+                    # Update display
+                    self.story_context = self.get_formatted_story()
+                    self.display.render_text(self.story_context)
+                    return True
+        
+        # Check for dropping items
+        drop_patterns = ['drop ', 'discard ', 'throw away ', 'remove ']
+        for pattern in drop_patterns:
+            if action.startswith(pattern):
+                item_name = action[len(pattern):].strip()
+                
+                if item_name in self.game_state['inventory']:
+                    self.game_state['inventory'].remove(item_name)
+                    response = f"You drop the {item_name}."
+                    self.story_memory.append({"segment": "action", "text": f"You {pattern}{item_name}."})
+                    self.story_memory.append({"segment": "continuation", "text": response})
+                    
+                    # Update display
+                    self.story_context = self.get_formatted_story()
+                    self.display.render_text(self.story_context)
+                    return True
+        
+        # Not an inventory command
+        return False
+        
     def play(self):
         """Main game loop."""
         clock = pygame.time.Clock()
@@ -657,6 +777,9 @@ class StoryAdventure:
         
         input_text = ""
         
+        # Create a font for UI elements
+        ui_font = pygame.font.Font(None, 24)
+        
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -669,6 +792,10 @@ class StoryAdventure:
                         if action == 'exit':
                             running = False
                             break
+                            
+                        # Check if it's an inventory command first
+                        if self.handle_inventory_commands(action):
+                            continue
                         
                         # Generate continuation and update state
                         continuation = self.generate_continuation(action)
@@ -699,6 +826,60 @@ class StoryAdventure:
             # Draw story text
             if self.display.story_surface:
                 self.display.screen.blit(self.display.story_surface, self.display.story_rect)
+            
+            # Draw inventory sidebar
+            inventory_surface = pygame.Surface((200, self.display.height - 60), pygame.SRCALPHA)
+            inventory_surface.fill((0, 0, 0, 180))  # Semi-transparent black
+            
+            # Title for inventory
+            inventory_title = ui_font.render("INVENTORY", True, self.display.WHITE)
+            inventory_surface.blit(inventory_title, (10, 10))
+            
+            # List inventory items
+            y_offset = 40
+            if not self.game_state["inventory"]:
+                empty_text = ui_font.render("Empty", True, self.display.WHITE)
+                inventory_surface.blit(empty_text, (20, y_offset))
+            else:
+                for item in self.game_state["inventory"]:
+                    item_text = ui_font.render(f"• {item}", True, self.display.WHITE)
+                    inventory_surface.blit(item_text, (20, y_offset))
+                    y_offset += 25
+            
+            # Display current quest if any
+            if self.game_state["current_quest"]:
+                quest_y = y_offset + 20
+                quest_title = ui_font.render("CURRENT QUEST:", True, (255, 215, 0))  # Gold color
+                inventory_surface.blit(quest_title, (10, quest_y))
+                
+                # Wrap quest text
+                quest_text = self.game_state["current_quest"]
+                words = quest_text.split()
+                quest_lines = []
+                current_line = []
+                line_width = 0
+                
+                for word in words:
+                    word_surface = ui_font.render(word, True, self.display.WHITE)
+                    word_width = word_surface.get_width()
+                    
+                    if line_width + word_width <= 180:  # Max width with some margin
+                        current_line.append(word)
+                        line_width += word_width + ui_font.size(' ')[0]  # Add space width
+                    else:
+                        quest_lines.append(' '.join(current_line))
+                        current_line = [word]
+                        line_width = word_width
+                
+                if current_line:
+                    quest_lines.append(' '.join(current_line))
+                
+                for i, line in enumerate(quest_lines):
+                    line_surf = ui_font.render(line, True, (255, 255, 150))  # Light yellow
+                    inventory_surface.blit(line_surf, (20, quest_y + 25 + i * 20))
+            
+            # Draw the inventory sidebar on the right side
+            self.display.screen.blit(inventory_surface, (self.display.width - 200, 10))
             
             # Draw input box
             pygame.draw.rect(self.display.screen, self.display.WHITE, self.display.input_rect, 2)
@@ -733,4 +914,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         main(sys.argv[1])
     else:
-        main() 
+        main()  
