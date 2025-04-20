@@ -895,7 +895,7 @@ def main(api_key=None):
     """Main entry point for the game with optional API key parameter"""
     # If no API key provided, use the default
     if not api_key:
-        api_key = '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'  # Default key
+        api_key = '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'  # Default key
     
     # Or check environment variable as fallback
     elif os.environ.get("OPENROUTER_API_KEY"):
